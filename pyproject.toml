@@ -1,0 +1,49 @@
+[tool.poetry]
+name = "hospital_readmission"
+version = "0.1.0"
+description = "ML pipeline to predict hospital readmission"
+authors = ["Elisa Vasta"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">3.11"
+hydra-core = "^1.1.1"
+matplotlib = "^3.10.0"
+scikit-learn = "^1.6.1"
+jupyter = "^1.1.1"
+seaborn = "^0.13.2"
+pyyaml = "^6.0.2"
+pyqt6 = "^6.8.0"
+fuzzywuzzy = "^0.18.0"
+
+[tool.poetry.group.dev]
+optional = true
+
+[tool.poetry.group.dev.dependencies]
+pdoc3 = "^0.10.0"
+pytest = "^6.2.5"
+pre-commit = "^2.17.0"
+ipykernel = "^6.28.0"
+pandas-stubs = "^2.2.2"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+exclude = [
+    ".bzr", ".direnv", ".eggs", ".git", ".git-rewrite", ".hg", ".mypy_cache",
+    ".nox", ".pants.d", ".pytype", ".ruff_cache", ".svn", ".tox", ".venv",
+    "__pypackages__", "_build", "buck-out", "build", "dist", "node_modules", "venv",
+]
+line-length = 88
+
+[tool.ruff.lint]
+ignore = ["E501"]
+select = ["B","C","E","F","W","B9","I","Q"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.mypy]
+ignore_missing_imports = true

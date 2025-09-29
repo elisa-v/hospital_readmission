@@ -1,0 +1,48 @@
+# --- Python / build ---
+__pycache__/
+*.py[cod]
+*.so
+.Python
+.env
+.venv/
+venv/
+build/
+dist/
+.eggs/
+*.egg-info/
+*.egg
+.installed.cfg
+
+# --- Tools / caches ---
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.cache/
+
+# --- Editors / OS ---
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# --- Notebooks ---
+.ipynb_checkpoints/
+
+# --- Logs ---
+*.log
+
+# --- Data & artifacts ---
+#data/raw/
+#data/processed/
+#data/final/
+models/
+results/
+**/.hydra/
+
+# Allow placeholders to keep empty dirs
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/final/.gitkeep
+!models/.gitkeep
+!results/.gitkeep
