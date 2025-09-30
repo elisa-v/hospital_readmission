@@ -112,3 +112,22 @@ Run tests with:
 ```bash
 pytest tests/
 ```
+
+---
+
+## Jupyter Notebooks
+
+To run the notebooks in `notebooks/` inside the Poetry environment:
+
+1. Install Jupyter in the Poetry environment:
+   ```bash
+   poetry run pip install jupyter ipykernel
+   ```
+
+2. Register the environment as a kernel:
+ ```bash
+   poetry run python -m ipykernel install --user --name=hospital-readmission
+   ```
+
+
+
