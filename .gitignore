@@ -1,4 +1,4 @@
-# --- Python / build ---
+# Python / build 
 __pycache__/
 *.py[cod]
 *.so
@@ -13,26 +13,28 @@ dist/
 *.egg
 .installed.cfg
 
-# --- Tools / caches ---
+# Tools / caches
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
 .cache/
 
-# --- Editors / OS ---
+# Editors / OS 
 .idea/
 .vscode/
 .DS_Store
 *.swp
 *.swo
 
-# --- Notebooks ---
+# Notebooks 
 .ipynb_checkpoints/
+notebooks/readmission-hospital_original.ipynb
 
-# --- Logs ---
+
+# Logs 
 *.log
 
-# --- Data & artifacts ---
+# Data & artifacts 
 #data/raw/
 #data/processed/
 #data/final/
