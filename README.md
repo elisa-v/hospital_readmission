@@ -128,6 +128,6 @@ To run the notebooks in `notebooks/` inside the Poetry environment:
  ```bash
    poetry run python -m ipykernel install --user --name=hospital-readmission
    ```
-
+3. In VS Code (or JupyterLab), select the kernel hospital-readmission when opening the notebook.
 
 

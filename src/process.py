@@ -8,10 +8,10 @@ import matplotlib.pyplot as plt
 
 from src.visualisation import inspect_data, plot_correlation_matrix, plot_class_counts, plot_outliers_per_subject, \
     plot_outliers_per_feature, plot_pca_variance, plot_pca_feature_importance
-from src.utils import load_data
+from src.utils import load_data, split_and_save_dataset
 from sklearn.pipeline import make_pipeline
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import SimpleImputer, IterativeImputer
 from sklearn.feature_selection import SequentialFeatureSelector
@@ -24,23 +24,70 @@ from sklearn.preprocessing import StandardScaler
 
 from scipy.stats import zscore
 
+TARGET = 're.admission.within.6.months'
+SEED = 42
+
 
 
 @hydra.main(config_path="../config", config_name="main", version_base="1.2")
 def main(config: DictConfig) -> None:
+    process(config)
+
+def process(config: DictConfig) -> None:
+    # ------------------------------------------------------------------ #
+    # 0) Load + basic inspection
+    # ------------------------------------------------------------------ #
     print(f"Loading data using {config.data.raw}")
 
     df_raw = load_data(config.data.raw)
     inspect_data(df_raw)
 
-    # Check for duplicates
-    if df_raw['inpatient.number'].is_unique:
-        print("No duplicates")
-    else:
-        print("There are duplicates")
+    # ------------------------------------------------------------------ #
+    # 1) Remove dead patients + drop death-related cols (no leakage)
+    # ------------------------------------------------------------------ #
+    df_no_dead = remove_dead_patients(df_raw)
+    df_no_dead_future =df_no_dead.drop(['re.admission.within.3.months','re.admission.within.28.days','time.of.death..days.from.admission.',
+                                    're.admission.time..days.from.admission.','return.to.emergency.department.within.6.months',
+                                    'time.to.emergency.department.within.6.months'], axis=1)
+    # Sanity: keep only rows with target present
+    df = df_no_dead.dropna(subset=[TARGET])
 
-    # Check for unbalanced classes
-    plot_class_counts(df_raw, 're.admission.within.6.months')
+    # ------------------------------------------------------------------ #
+    # 2) Train/Test split (stratified)
+    # ------------------------------------------------------------------ #
+    train, test = split_and_save_dataset(df, target_column=TARGET, 
+                                         output_dir='../data/raw/', test_size=0.2, random_state=42)
+    
+    # ------------------------------------------------------------------ #
+    # 3) Categorical / Binary / Numerical processing (train only, then transform test)
+    # ------------------------------------------------------------------ #
+    X_train = train.copy()
+    y_train = train[TARGET]
+    
+    # Split by dtype
+    X_train_num  = X_train.select_dtypes(include=['int64', 'float64'])  # Numerical features
+    X_train_cat  = X_train.select_dtypes(include=['object'])  # Categorical features
+
+    # Categorical block
+    X_train_cat_final = process_cat_variables(X_train_cat)  
+
+    # Binary block
+    X_train_bin_final, X_train_num2 = process_binary_variables(X_train_num)
+    
+    # Numerical cleaning (drop ids, high-NaN, outliers → NaN, impute)
+    X_train_num2 = X_train_num2.drop(['Unnamed: 0','inpatient.number'], axis=1)
+    X_train_num2 = drop_high_nan_columns(X_train_num2, threshold=0.30)
+
+    outlier_tf = OutlierToNan(move_outliers=True, nan_threshold=0.40)
+    X_train_num2 = outlier_tf.transform(X_train_num2)
+
+    imputer = SimpleImputer(strategy='mean') 
+    X_train_num_final = pd.DataFrame(imputer.fit_transform(X_train_num2), columns=X_train_num2.columns, 
+                                   index=X_train_num2.index)
+
+    X_train_final = pd.concat([X_train_cat_final, X_train_bin_final, X_train_num_final], axis=1)
+
+    return X_train_cat_final, X_train_bin_final, X_train_num_final
 
 
 def remove_dead_patients(df: pd.DataFrame) -> pd.DataFrame:
@@ -71,9 +118,12 @@ def remove_dead_patients(df: pd.DataFrame) -> pd.DataFrame:
 
 def process_cat_variables(df_cat: pd.DataFrame) -> pd.DataFrame:
     df_cat= df_cat.copy()
+    if 'respiratory.support.' in df_cat.columns:
+        df_cat = df_cat.drop(columns=['respiratory.support.'])
     df_cat.drop(
         ['admission.way', 'discharge.department', 'type.II.respiratory.failure', 'consciousness', 'oxygen.inhalation'],
         axis=1, inplace=True)
+    
 
     # Combine 'workers' and 'Officer' into 'Others' in 'occupation'
     df_cat['occupation'] = df_cat['occupation'].replace(['worker'], 'farmer')
@@ -95,8 +145,30 @@ def process_cat_variables(df_cat: pd.DataFrame) -> pd.DataFrame:
 
     return df_cat_final
 
+def process_binary_variables(df_num: pd.DataFrame):
+    binary_variables= ['myocardial.infarction','congestive.heart.failure','peripheral.vascular.disease','cerebrovascular.disease',
+                    'dementia','Chronic.obstructive.pulmonary.disease','connective.tissue.disease','peptic.ulcer.disease',
+                    'diabetes','moderate.to.severe.chronic.kidney.disease','hemiplegia','leukemia','malignant.lymphoma',
+                    'solid.tumor','liver.disease','AIDS','acute.renal.failure']
+               
+    X_train_bin = df_num[binary_variables].copy()
+    X_train_bin_new = group_general_condition_variables(X_train_bin)
 
-def process_binary_variables(df_binary: pd.DataFrame) -> pd.DataFrame:
+    to_drop = ['myocardial.infarction','peripheral.vascular.disease','cerebrovascular.disease',
+                'AIDS','acute.renal.failure','hemiplegia','leukemia','malignant.lymphoma','solid.tumor','liver.disease','connective.tissue.disease','peptic.ulcer.disease','dementia',
+                    'Chronic.obstructive.pulmonary.disease', 'cancer', 'chronic_heart_pulmonary_disease']
+    X_train_bin_final = X_train_bin_new.drop(to_drop, axis=1)
+
+    # Numerical block (remove binary + obvious non-numerical feature columns)
+    df_num2  = df_num.drop(labels=binary_variables, axis=1, inplace=False)
+    df_num2  = df_num2.drop(labels=['visit.times','eye.opening','verbal.response','movement','GCS'], axis=1)
+
+    # Feature engineering: create variable "exam" 
+    df_bin_final = create_exam_feature(df_num2, X_train_bin_final)
+    return df_bin_final, df_num2 
+
+
+def group_general_condition_variables(df_binary: pd.DataFrame) -> pd.DataFrame:
     df_binary = df_binary.copy()
     # Group diseases and create binary variables
     df_binary['cardiovascular_disease'] = (df_binary[['myocardial.infarction', 'congestive.heart.failure',
@@ -229,6 +301,19 @@ def convert_to_ordinal_variables(df: pd.DataFrame) -> pd.DataFrame:
     # Apply the mapping
     df['Killip.grade'] = df['Killip.grade'].map(mapping).astype(int)
     df['NYHA.cardiac.function.classification'] = df['NYHA.cardiac.function.classification'].map(mapping).astype(int)
+
+    age_mapping = {
+    "(11,19]": 0,
+    "(21,29]": 1,
+    "(29,39]": 2,
+    "(39,49]": 3,
+    "(49,59]": 4,
+    "(59,69]": 5,
+    "(69,79]": 6,
+    "(79,89]": 7,
+    "(89,110]": 8
+    }
+    df['ageCat'] = df['ageCat'].map(age_mapping).astype("Int64")
 
     return df
 

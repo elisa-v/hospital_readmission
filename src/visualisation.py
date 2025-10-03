@@ -194,30 +194,6 @@ def plot_outliers_per_feature(abs_zscores):
 
     return feature_list_new
 
-
-def plot_pairplot(df, features=None, hue='re.admission.within.6.months', max_features=20):
-
-    if features is None:
-        features = df.select_dtypes(include=['number']).columns[:max_features].tolist()
-    else:
-        features = features[:max_features]  # Limit to max_features
-
-    sns.pairplot(df[features + [hue]], hue=hue, palette='Set1', diag_kind='kde', plot_kws={'alpha': 0.5})
-    plt.show()
-
-
-# def plot_pairplot(df: pd.DataFrame, features: Optional[List[str]] = None, hue: str = 're.admission.within.6.months',
-#                   max_features: int = 20) -> None:
-#     if features is None:
-#         features = df.select_dtypes(include=['number']).columns.tolist()
-#
-#     for i in range(0, len(features), max_features):
-#         subset_features = features[i:i + max_features]
-#         print(f"Plotting features {i + 1} to {i + len(subset_features)} out of {len(features)}")
-#         sns.pairplot(df[subset_features + [hue]], hue=hue, palette='Set1', diag_kind='kde', plot_kws={'alpha': 0.5})
-#         plt.show()
-
-
 def plot_pairplot(df: pd.DataFrame, features: Optional[List[str]] = None, hue: str = 're.admission.within.6.months',
                   max_features: int = 20) -> None:
 
@@ -309,34 +285,6 @@ def plot_pca_variance(explained_variance_ratio: np.ndarray, cumulative_variance:
     plt.grid()
     plt.show()
 
-
-# def plot_pca_variance(explained_variance_ratio: np.ndarray, cumulative_variance: np.ndarray,
-#                       variance_threshold: float = 0.9) -> None:
-#
-#     # Create figure and primary axis (Explained Variance)
-#     fig, ax1 = plt.subplots(figsize=(10, 6))
-#
-#     # Bar plot for explained variance (left y-axis)
-#     ax1.bar(range(1, len(explained_variance_ratio) + 1), explained_variance_ratio, alpha=0.7,
-#             label='Explained Variance', color='C0')
-#     ax1.set_xlabel('Principal Components')
-#     ax1.set_ylabel('Explained Variance', color='C0')
-#     ax1.tick_params(axis='y', labelcolor='C0')
-#
-#     # Secondary y-axis for cumulative variance
-#     ax2 = ax1.twinx()
-#     ax2.plot(range(1, len(cumulative_variance) + 1), cumulative_variance, marker='o', linestyle='--',
-#              color='r', label='Cumulative Variance')
-#     ax2.set_ylabel('Cumulative Variance', color='r')
-#     ax2.tick_params(axis='y', labelcolor='r')
-#
-#     # Title and legend
-#     fig.suptitle('PCA: Explained Variance per Component & Cumulative Variance')
-#     ax1.legend(loc='upper left')
-#     ax2.legend(loc='upper right')
-#
-#     plt.grid()
-#     plt.show()
 
 
 def plot_pca_feature_importance(df: pd.DataFrame, pca: PCA, num_pcs: int = 5):
