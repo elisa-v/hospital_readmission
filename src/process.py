@@ -18,6 +18,10 @@ from sklearn.feature_selection import SequentialFeatureSelector
 from typing import Tuple, Union, List, Optional
 from sklearn.base import BaseEstimator
 from sklearn.base import ClassifierMixin
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
 
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
@@ -50,7 +54,7 @@ def process(config: DictConfig) -> None:
                                     're.admission.time..days.from.admission.','return.to.emergency.department.within.6.months',
                                     'time.to.emergency.department.within.6.months'], axis=1)
     # Sanity: keep only rows with target present
-    df = df_no_dead.dropna(subset=[TARGET])
+    df = df_no_dead_future.dropna(subset=[TARGET])
 
     # ------------------------------------------------------------------ #
     # 2) Train/Test split (stratified)
@@ -69,25 +73,61 @@ def process(config: DictConfig) -> None:
     X_train_cat  = X_train.select_dtypes(include=['object'])  # Categorical features
 
     # Categorical block
-    X_train_cat_final = process_cat_variables(X_train_cat)  
+    X_train_cat2 = process_cat_variables(X_train_cat)  
 
     # Binary block
     X_train_bin_final, X_train_num2 = process_binary_variables(X_train_num)
     
     # Numerical cleaning (drop ids, high-NaN, outliers → NaN, impute)
-    X_train_num2 = X_train_num2.drop(['Unnamed: 0','inpatient.number'], axis=1)
-    X_train_num2 = drop_high_nan_columns(X_train_num2, threshold=0.30)
+    X_train_num2 = process_numerical_variables(X_train_num2)
 
-    outlier_tf = OutlierToNan(move_outliers=True, nan_threshold=0.40)
-    X_train_num2 = outlier_tf.transform(X_train_num2)
+    # Ordinal block
+    ordinal_cols = ["Killip.grade", "NYHA.cardiac.function.classification", "ageCat", "CCI.score"]
+    X_train_cat_final, X_train_num_final, X_train_ord_final = process_ordinal_variables(X_train_cat2, X_train_num2, ordinal_cols)
 
-    imputer = SimpleImputer(strategy='mean') 
-    X_train_num_final = pd.DataFrame(imputer.fit_transform(X_train_num2), columns=X_train_num2.columns, 
-                                   index=X_train_num2.index)
+    pre = build_preprocessor(X_train_cat_final, X_train_bin_final, 
+                             X_train_num_final, X_train_ord_final, scale_numeric=True)
+    
+    # Fit on training data
+    X_train_full = pd.concat([X_train_cat_final, X_train_bin_final, X_train_num_final, X_train_ord_final], axis=1)
+    X_train_prepared = pre.fit_transform(X_train_full)
 
-    X_train_final = pd.concat([X_train_cat_final, X_train_bin_final, X_train_num_final], axis=1)
+    # Apply same transformation to test
+    X_test_full = pd.concat([X_test_cat_final, X_test_bin_final, X_test_num_final, X_test_ord_final], axis=1)
+    X_test_prepared = pre.transform(X_test_full)
 
-    return X_train_cat_final, X_train_bin_final, X_train_num_final
+
+
+
+
+def build_preprocessor(x_cat: pd.DataFrame, x_binary: pd.DataFrame, 
+                       x_num: pd.DataFrame, x_ord: pd.DataFrame, 
+                       standard_scale=True) -> ColumnTransformer:
+
+    cat_cols = x_cat.columns.tolist()
+    bin_ord_cols = x_binary.columns.tolist() + x_ord.columns.tolist()
+    num_cols = x_num.columns.tolist()
+
+    # Build numeric pipeline with optional standard scaling
+    num_steps = [("impute", SimpleImputer(strategy="mean"))]
+    if standard_scale:
+        num_steps.append(("scale", StandardScaler()))
+    num_pipe = Pipeline(num_steps)
+
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("num", num_pipe, num_cols),
+            ("cat", Pipeline([
+                ("impute", SimpleImputer(strategy="most_frequent")),
+                ("ohe", OneHotEncoder(handle_unknown="ignore", sparse=False))
+            ]), cat_cols),
+            ("binord", Pipeline([
+                ("impute", SimpleImputer(strategy="most_frequent"))
+            ]), bin_ord_cols),
+        ],
+        remainder="drop"
+    )
+    return preprocessor
 
 
 def remove_dead_patients(df: pd.DataFrame) -> pd.DataFrame:
@@ -116,14 +156,22 @@ def remove_dead_patients(df: pd.DataFrame) -> pd.DataFrame:
     return df_processed
 
 
-def process_cat_variables(df_cat: pd.DataFrame) -> pd.DataFrame:
+def process_numerical_variables(df_num: pd.DataFrame) -> pd.DataFrame:
+    df_num = df_num.drop(['Unnamed: 0','inpatient.number'], axis=1)
+    df_num = drop_high_nan_columns(df_num, threshold=0.30)
+
+    outlier_tf = OutlierToNan(move_outliers=True, nan_threshold=0.40)
+    df_num = outlier_tf.transform(df_num)
+    return df_num
+
+
+def process_cat_variables(df_cat: pd.DataFrame, drop_ordinal = False) -> pd.DataFrame:
     df_cat= df_cat.copy()
     if 'respiratory.support.' in df_cat.columns:
         df_cat = df_cat.drop(columns=['respiratory.support.'])
     df_cat.drop(
         ['admission.way', 'discharge.department', 'type.II.respiratory.failure', 'consciousness', 'oxygen.inhalation'],
         axis=1, inplace=True)
-    
 
     # Combine 'workers' and 'Officer' into 'Others' in 'occupation'
     df_cat['occupation'] = df_cat['occupation'].replace(['worker'], 'farmer')
@@ -143,7 +191,32 @@ def process_cat_variables(df_cat: pd.DataFrame) -> pd.DataFrame:
 
     df_cat_final = convert_to_ordinal_variables(df_cat)
 
+    if drop_ordinal:
+        ordinal_cols = ["Killip.grade", "NYHA.cardiac.function.classification", "ageCat"]
+        df_cat_final = df_cat_final.drop(columns=ordinal_cols, errors="ignore")
+
     return df_cat_final
+
+
+import pandas as pd
+
+def process_ordinal_variables(df_cat: pd.DataFrame,
+                          df_num: pd.DataFrame,
+                          ordinal_cols: list[str]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+
+    # Collect ordinals present in cat and num
+    df_ordin = pd.concat([
+        df_cat[ordinal_cols.intersection(df_cat.columns)],
+        df_num[ordinal_cols.intersection(df_num.columns)]
+    ], axis=1)
+
+    # Drop them from the originals
+    df_cat = df_cat.drop(columns=ordinal_cols, errors="ignore")
+    df_num = df_num.drop(columns=ordinal_cols, errors="ignore")
+
+    return df_cat, df_num, df_ordin
+
+
 
 def process_binary_variables(df_num: pd.DataFrame):
     binary_variables= ['myocardial.infarction','congestive.heart.failure','peripheral.vascular.disease','cerebrovascular.disease',
@@ -297,11 +370,6 @@ def convert_to_ordinal_variables(df: pd.DataFrame) -> pd.DataFrame:
 
     # Define the mapping for ordinal encoding
     mapping = {'I': 1, 'II': 2, 'III': 3, 'IV': 4}
-
-    # Apply the mapping
-    df['Killip.grade'] = df['Killip.grade'].map(mapping).astype(int)
-    df['NYHA.cardiac.function.classification'] = df['NYHA.cardiac.function.classification'].map(mapping).astype(int)
-
     age_mapping = {
     "(11,19]": 0,
     "(21,29]": 1,
@@ -313,6 +381,10 @@ def convert_to_ordinal_variables(df: pd.DataFrame) -> pd.DataFrame:
     "(79,89]": 7,
     "(89,110]": 8
     }
+
+    # Apply the mapping
+    df['Killip.grade'] = df['Killip.grade'].map(mapping).astype(int)
+    df['NYHA.cardiac.function.classification'] = df['NYHA.cardiac.function.classification'].map(mapping).astype(int)
     df['ageCat'] = df['ageCat'].map(age_mapping).astype("Int64")
 
     return df
