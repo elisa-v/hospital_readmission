@@ -1,4 +1,5 @@
 
+import os
 import hydra
 import numpy as np
 from omegaconf import DictConfig
@@ -8,7 +9,7 @@ import matplotlib.pyplot as plt
 
 from src.visualisation import inspect_data, plot_correlation_matrix, plot_class_counts, plot_outliers_per_subject, \
     plot_outliers_per_feature, plot_pca_variance, plot_pca_feature_importance
-from src.utils import load_data, split_and_save_dataset
+from src.utils import load_data, save_final_datasets, save_preprocessor, split_and_save_dataset
 from sklearn.pipeline import make_pipeline
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import cross_val_score, train_test_split
@@ -19,7 +20,7 @@ from typing import Tuple, Union, List, Optional
 from sklearn.base import BaseEstimator
 from sklearn.base import ClassifierMixin
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, RobustScaler
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 
@@ -32,12 +33,12 @@ TARGET = 're.admission.within.6.months'
 SEED = 42
 
 
-
 @hydra.main(config_path="../config", config_name="main", version_base="1.2")
 def main(config: DictConfig) -> None:
-    process(config)
+    X_train, X_test, y_train, y_test = process(config)
+    print(f"Process complete. Train: {X_train.shape}, Test: {X_test.shape}")
 
-def process(config: DictConfig) -> None:
+def process(config: DictConfig) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
     # ------------------------------------------------------------------ #
     # 0) Load + basic inspection
     # ------------------------------------------------------------------ #
@@ -60,73 +61,117 @@ def process(config: DictConfig) -> None:
     # 2) Train/Test split (stratified)
     # ------------------------------------------------------------------ #
     train, test = split_and_save_dataset(df, target_column=TARGET, 
-                                         output_dir='../data/raw/', test_size=0.2, random_state=42)
+                                         output_dir=config.data.processed, test_size=0.2, random_state=42)
     
-    # ------------------------------------------------------------------ #
-    # 3) Categorical / Binary / Numerical processing (train only, then transform test)
-    # ------------------------------------------------------------------ #
-    X_train = train.copy()
     y_train = train[TARGET]
+    y_test = test[TARGET]
     
-    # Split by dtype
-    X_train_num  = X_train.select_dtypes(include=['int64', 'float64'])  # Numerical features
-    X_train_cat  = X_train.select_dtypes(include=['object'])  # Categorical features
+    # ------------------------------------------------------------------ #
+    # 3) Feature processing
+    # ------------------------------------------------------------------ #
 
-    # Categorical block
-    X_train_cat2 = process_cat_variables(X_train_cat)  
+    def process_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        df_num = df.select_dtypes(include=["int64", "float64"]) # Numerical features
+        df_cat = df.select_dtypes(include=["object"]) # Categorical features
 
-    # Binary block
-    X_train_bin_final, X_train_num2 = process_binary_variables(X_train_num)
-    
-    # Numerical cleaning (drop ids, high-NaN, outliers → NaN, impute)
-    X_train_num2 = process_numerical_variables(X_train_num2)
+        # Categorical block
+        df_cat2 = process_cat_variables(df_cat)
 
-    # Ordinal block
-    ordinal_cols = ["Killip.grade", "NYHA.cardiac.function.classification", "ageCat", "CCI.score"]
-    X_train_cat_final, X_train_num_final, X_train_ord_final = process_ordinal_variables(X_train_cat2, X_train_num2, ordinal_cols)
+        # Binary block
+        df_bin_final, df_num2 = process_binary_variables(df_num)
 
-    pre = build_preprocessor(X_train_cat_final, X_train_bin_final, 
-                             X_train_num_final, X_train_ord_final, scale_numeric=True)
-    
-    # Fit on training data
-    X_train_full = pd.concat([X_train_cat_final, X_train_bin_final, X_train_num_final, X_train_ord_final], axis=1)
+        # Numerical cleaning
+        df_num2 = process_numerical_variables(df_num2)
+
+        # Ordinal block
+        ordinal_cols = ["Killip.grade", "NYHA.cardiac.function.classification", "ageCat", "CCI.score"]
+        df_cat_final, df_num_final, df_ord_final = process_ordinal_variables(df_cat2, df_num2, ordinal_cols)
+
+        return df_cat_final, df_bin_final, df_num_final, df_ord_final
+
+    # Train blocks
+    X_train_cat, X_train_bin, X_train_num, X_train_ord = process_features(train)
+
+    # Test blocks
+    X_test_cat, X_test_bin, X_test_num, X_test_ord = process_features(test)
+
+    # ------------------------------------------------------------------ #
+    # 4) Apply processing step and save final datasets
+    # ------------------------------------------------------------------ #
+    pre = build_preprocessor(X_train_cat, X_train_bin, 
+                             X_train_num, X_train_ord, config)
+
+    # Fit on train, transform both train + test
+    X_train_full = pd.concat([X_train_cat, X_train_bin, X_train_num, X_train_ord], axis=1)
+    X_test_full = pd.concat([X_test_cat, X_test_bin, X_test_num, X_test_ord], axis=1)
+
     X_train_prepared = pre.fit_transform(X_train_full)
-
-    # Apply same transformation to test
-    X_test_full = pd.concat([X_test_cat_final, X_test_bin_final, X_test_num_final, X_test_ord_final], axis=1)
     X_test_prepared = pre.transform(X_test_full)
+    
+    # Assign the original feature names
+    feature_names = pre.get_feature_names_out()
+    X_train_prepared = pd.DataFrame(X_train_prepared, columns=feature_names, index=train.index)
+    X_test_prepared = pd.DataFrame(X_test_prepared, columns=feature_names, index=test.index)
 
+    save_final_datasets(X_train_prepared, X_test_prepared, y_train, y_test, config.data.final)
 
+    if config.preprocessing.get("save_preprocessor", False):
+        save_preprocessor(pre, "../models/preprocessor.joblib")
 
-
+    return X_train_prepared, X_test_prepared, y_train, y_test
+    
 
 def build_preprocessor(x_cat: pd.DataFrame, x_binary: pd.DataFrame, 
                        x_num: pd.DataFrame, x_ord: pd.DataFrame, 
-                       standard_scale=True) -> ColumnTransformer:
+                       config: DictConfig,) -> ColumnTransformer:
+
+    # Extract configuration options
+    impute_num = config.preprocessing.impute_method.numeric
+    impute_cat = config.preprocessing.impute_method.categorical
+    impute_binord = config.preprocessing.impute_method.binary_ordinal
+    scaling_method = config.preprocessing.scaling
+    cat_encoding = config.preprocessing.categorical_encoding
 
     cat_cols = x_cat.columns.tolist()
     bin_ord_cols = x_binary.columns.tolist() + x_ord.columns.tolist()
     num_cols = x_num.columns.tolist()
 
+    # Choose scaler for numerical variables
+    if scaling_method == "standard":
+        scaler = StandardScaler()
+    elif scaling_method == "minmax":
+        scaler = MinMaxScaler()
+    elif scaling_method == "robust":
+        scaler = RobustScaler()
+    else:
+        scaler = "passthrough"
+
     # Build numeric pipeline with optional standard scaling
-    num_steps = [("impute", SimpleImputer(strategy="mean"))]
-    if standard_scale:
-        num_steps.append(("scale", StandardScaler()))
+    num_steps = [("impute", SimpleImputer(strategy=impute_num))]
+    if scaler != "passthrough":
+        num_steps.append(("scale", scaler))
     num_pipe = Pipeline(num_steps)
+
+    # Build categorical pipeline
+    cat_steps = [("impute", SimpleImputer(strategy=impute_cat))]
+    if cat_encoding == "onehot":
+        cat_steps.append(("ohe", OneHotEncoder(handle_unknown="ignore", sparse_output=False)))
+    cat_pipe = Pipeline(cat_steps)
+
+    # Binary/Ordinal pipeline
+    binord_pipe = Pipeline([
+        ("impute", SimpleImputer(strategy=impute_binord))
+    ])
 
     preprocessor = ColumnTransformer(
         transformers=[
             ("num", num_pipe, num_cols),
-            ("cat", Pipeline([
-                ("impute", SimpleImputer(strategy="most_frequent")),
-                ("ohe", OneHotEncoder(handle_unknown="ignore", sparse=False))
-            ]), cat_cols),
-            ("binord", Pipeline([
-                ("impute", SimpleImputer(strategy="most_frequent"))
-            ]), bin_ord_cols),
+            ("cat", cat_pipe, cat_cols),
+            ("binord", binord_pipe, bin_ord_cols),
         ],
         remainder="drop"
     )
+
     return preprocessor
 
 
@@ -177,6 +222,7 @@ def process_cat_variables(df_cat: pd.DataFrame, drop_ordinal = False) -> pd.Data
     df_cat['occupation'] = df_cat['occupation'].replace(['worker'], 'farmer')
     df_cat['occupation'] = df_cat['occupation'].replace(['farmer'], 'farmer_worker')
     df_cat['occupation'] = df_cat['occupation'].replace(['Officer'], 'Others')
+    
     # Replace 'Others' with NaN (we will infere the missing values later)
     df_cat['occupation'] = df_cat['occupation'].replace('Others', np.nan)
 
@@ -204,21 +250,25 @@ def process_ordinal_variables(df_cat: pd.DataFrame,
                           df_num: pd.DataFrame,
                           ordinal_cols: list[str]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
-    # Collect ordinals present in cat and num
-    df_ordin = pd.concat([
-        df_cat[ordinal_cols.intersection(df_cat.columns)],
-        df_num[ordinal_cols.intersection(df_num.columns)]
-    ], axis=1)
+    # Columns that are both in ordinal list and present in each df
+    ord_in_cat = [c for c in ordinal_cols if c in df_cat.columns]
+    ord_in_num = [c for c in ordinal_cols if c in df_num.columns]
+
+    # Ordinal block gathered from both
+    df_ord = pd.concat(
+        [df_cat[ord_in_cat], df_num[ord_in_num]],
+        axis=1
+    )
 
     # Drop them from the originals
     df_cat = df_cat.drop(columns=ordinal_cols, errors="ignore")
     df_num = df_num.drop(columns=ordinal_cols, errors="ignore")
 
-    return df_cat, df_num, df_ordin
+    return df_cat, df_num, df_ord
 
 
 
-def process_binary_variables(df_num: pd.DataFrame):
+def process_binary_variables(df_num: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     binary_variables= ['myocardial.infarction','congestive.heart.failure','peripheral.vascular.disease','cerebrovascular.disease',
                     'dementia','Chronic.obstructive.pulmonary.disease','connective.tissue.disease','peptic.ulcer.disease',
                     'diabetes','moderate.to.severe.chronic.kidney.disease','hemiplegia','leukemia','malignant.lymphoma',
@@ -405,7 +455,7 @@ def evaluate_imputation_methods(
         df_num_final: pd.DataFrame,
         y: pd.Series,
         model: ClassifierMixin,  # Accepts any classification model
-        n_splits: int = 3):
+        n_splits: int = 3) -> pd.DataFrame:
 
     # Store min and max values of features (for IterativeImputer)
     arr_min = df_num_final.min()
@@ -567,7 +617,4 @@ def analyze_outliers(df: pd.DataFrame, plot_per_subject: bool = True, plot_per_f
 
 if __name__ == "__main__":
     main()
-
-    #df = load_data('../config/process/process1.yaml')
-    #df = inspect_data(df)
 

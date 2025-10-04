@@ -1,6 +1,4 @@
 defaults:
-  #- process: process1  # Selects the default preprocessing pipeline
-  #- model: model1      # Selects the default model
   - _self_
 
 # Data paths
@@ -11,12 +9,14 @@ data:
 
 # Preprocessing settings
 preprocessing:
-  steps:  # Define which preprocessing steps to apply
-    - normalize
-    - impute_missing
-    - feature_engineering
-  impute_method: mean  # Options: mean, median, knn
-  scaling: standard    # Options: minmax, standard, robust
+  impute_method:
+    numeric: mean            # Options: mean, median, most_frequent, knn
+    categorical: most_frequent
+    binary_ordinal: most_frequent
+  scaling: standard          # Options: none, standard, minmax, robust
+  categorical_encoding: onehot  # onehot or none
+  save_preprocessor: true
+
 
 # Model selection & hyperparameters
 model:
