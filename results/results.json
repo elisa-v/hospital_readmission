@@ -1,0 +1,16 @@
+{
+  "best_params": {
+    "max_depth": 20,
+    "min_samples_leaf": 1,
+    "min_samples_split": 2,
+    "n_estimators": 200
+  },
+  "f1_train": 0.49120589836259726,
+  "f1_test": 0.39378238341968913,
+  "roc_auc": 0.6341154770075497,
+  "auc_precision_recall": 0.528689043712367,
+  "mean_precision": 0.506946415062765,
+  "mean_recall": 0.5773324644292386,
+  "refit_on_full_train": true,
+  "model_path": "C:\\Users\\elisa\\Documents\\Courses\\hospital_readmission\\models\\rf_100_best.joblib"
+}

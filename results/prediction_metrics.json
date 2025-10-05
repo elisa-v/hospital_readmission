@@ -1,0 +1,10 @@
+{
+  "accuracy": 0.6102564102564103,
+  "f1": 0.36666666666666664,
+  "roc_auc": 0.5880439258750858,
+  "auc_precision_recall": -0.4646153065655373,
+  "mean_precision": 0.45917136278031556,
+  "mean_recall": 0.5521547053430024,
+  "model_path": "C:\\Users\\elisa\\Documents\\Courses\\hospital_readmission\\models\\rf_100_best.joblib",
+  "n_samples": 390
+}

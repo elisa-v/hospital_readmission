@@ -32,6 +32,9 @@ notebooks/readmission-hospital_original.ipynb
 notebooks/readmission-hospital.ipynb
 notebooks/feature_selection.ipynb
 
+# Test folder
+/tests/
+
 
 # Logs 
 *.log
@@ -40,8 +43,11 @@ notebooks/feature_selection.ipynb
 #data/raw/
 #data/processed/
 #data/final/
-models/
-results/
+#models/
+results/*/
+!results/*.json
+!results/*.csv
+!results/.gitkeep
 **/.hydra/
 
 # Allow placeholders to keep empty dirs
