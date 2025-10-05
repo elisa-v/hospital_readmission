@@ -4,8 +4,8 @@ defaults:
 # Data paths
 data:
   raw: data/raw/data.csv
-  processed: data/processed/processed.csv
-  final: data/final/final.csv
+  processed: data/processed
+  final: data/final
 
 # Preprocessing settings
 preprocessing:

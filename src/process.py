@@ -10,13 +10,13 @@ import matplotlib.pyplot as plt
 from src.visualisation import inspect_data, plot_correlation_matrix, plot_class_counts, plot_outliers_per_subject, \
     plot_outliers_per_feature, plot_pca_variance, plot_pca_feature_importance
 from src.utils import load_data, save_final_datasets, save_preprocessor, split_and_save_dataset
-from sklearn.pipeline import make_pipeline
+from sklearn.pipeline import FunctionTransformer, make_pipeline
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import SimpleImputer, IterativeImputer
 from sklearn.feature_selection import SequentialFeatureSelector
-from typing import Tuple, Union, List, Optional
+from typing import Any, Tuple, Union, List, Optional
 from sklearn.base import BaseEstimator
 from sklearn.base import ClassifierMixin
 from sklearn.compose import ColumnTransformer
@@ -119,7 +119,13 @@ def process(config: DictConfig) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, 
         save_preprocessor(pre, "../models/preprocessor.joblib")
 
     return X_train_prepared, X_test_prepared, y_train, y_test
-    
+
+
+def _pdna_to_nan_numpy(X: Any) -> np.ndarray:
+    df = pd.DataFrame(X)
+    df = df.astype(object).where(pd.notna(df), np.nan)
+    return df.to_numpy()
+
 
 def build_preprocessor(x_cat: pd.DataFrame, x_binary: pd.DataFrame, 
                        x_num: pd.DataFrame, x_ord: pd.DataFrame, 
@@ -153,14 +159,18 @@ def build_preprocessor(x_cat: pd.DataFrame, x_binary: pd.DataFrame,
     num_pipe = Pipeline(num_steps)
 
     # Build categorical pipeline
-    cat_steps = [("impute", SimpleImputer(strategy=impute_cat))]
+    cat_steps = [
+        ("nafix", FunctionTransformer(_pdna_to_nan_numpy, feature_names_out="one-to-one")),
+        ("impute", SimpleImputer(missing_values=np.nan, strategy=impute_cat)),
+    ]
     if cat_encoding == "onehot":
         cat_steps.append(("ohe", OneHotEncoder(handle_unknown="ignore", sparse_output=False)))
     cat_pipe = Pipeline(cat_steps)
 
     # Binary/Ordinal pipeline
     binord_pipe = Pipeline([
-        ("impute", SimpleImputer(strategy=impute_binord))
+        ("nafix", FunctionTransformer(_pdna_to_nan_numpy, feature_names_out="one-to-one")),
+        ("impute", SimpleImputer(missing_values=np.nan, strategy=impute_binord)),
     ])
 
     preprocessor = ColumnTransformer(
