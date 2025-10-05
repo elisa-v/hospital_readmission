@@ -1,15 +1,13 @@
 # Patient Readmission Prediction
 
 ## Overview  
-This project builds a machine learning pipeline to predict patient readmission using structured hospital data.  
+This project builds a reproducible machine learning pipeline to predict patient readmission using structured hospital data.
 
-The main goals are to:  
-- Explore and preprocess patient data.  
-- Train baseline models (Logistic Regression, Random Forest).  
-- Evaluate performance using cross-validation.  
-- Save results and trained models in a reproducible way.  
+The workflow is fully automated:
 
-The project follows a clean ML project structure with configuration files for preprocessing, model training, and experiment tracking.
+- Preprocess data → clean, impute, encode, and split datasets.
+- Train model → perform grid search, evaluate with cross-validation, refit the best model on full data.
+- Predict & evaluate → evaluate on held-out test data with metrics, confusion matrix, and ROC/PR curves
 
 ---
 
@@ -21,17 +19,17 @@ The project follows a clean ML project structure with configuration files for pr
 │   └── main.yaml             # Central configuration file
 ├── data/            
 │   ├── raw/                  # Original dataset
-│   ├── processed/            # Cleaned dataset (train/test split)
-│   └── final/                # Final predictions
-├── models/                   # Trained models
-├── notebooks/                # Jupyter notebooks for EDA & experiments
-├── src/                      # Source code
-│   ├── process.py            # Data preprocessing pipeline
-│   ├── train_model.py        # Model training & evaluation
-│   └── utils.py              # Helper functions
-├── tests/                    # Tests
-│   ├── test_process.py
-│   └── test_train_model.py
+│   ├── processed/            # Processed intermediate data
+│   └── final/                # Final train/test sets (X_train_final.csv etc.)
+├── models/                   # Saved models (best estimators, preprocessors)
+├── notebooks/                # Jupyter notebooks for analysis
+├── src/                      
+│   ├── process.py               # Data preprocessing pipeline
+│   ├── train_model.py           # Model training & refit on full data
+│   ├── predict.py               # Model loading & evaluation on test data
+│   ├── feature_selection.py     # Optional feature selection logic
+│   ├── visualisation.py         # Custom plots and figures
+│   └── utils.py                 # Shared helpers and path utilities
 ├── results/                  # Experiment results (metrics, logs)
 ├── pyproject.toml            # Dependencies (Poetry)
 ├── .gitignore
@@ -41,7 +39,10 @@ The project follows a clean ML project structure with configuration files for pr
 
 ## Environment Setup
 
-1. Install Poetry: https://python-poetry.org/docs/#installation
+1. Install Poetry (https://python-poetry.org/docs/#installation)
+```bash
+pip install poetry
+```
 
 2. Configure Poetry to create the virtual environment inside the project (one-time setup):  
 ```bash
@@ -84,51 +85,66 @@ poetry run python -m src.process
 ```bash
 python -m src.process
 ```
+- Loads raw data from data/raw/data.csv
+- Cleans, imputes, encodes, and splits data
+- Saves outputs to data/final/ (X_train_final.csv, y_test_final.csv, etc.)
+---
 
-### Train and evaluate the model 
+### Train the model (only on training data)
 ```bash
 python -m src.train_model
 ```
-Trained models will be stored in models/ and results in results/.
+- Loads data from data/final/
+- Performs GridSearchCV on X_train_final (with internal 5-fold CV)
+- Evaluates using both train and validation metrics
+- Plots ROC/PR curves for train & validation
+- Refits the best model on the entire training dataset
+   - Saves model → models/{model_type}_best.joblib
+   - Saves metrics → results/results.json
+---
+
+### Evaluate the model on test data
+```bash
+python -m src.predict
+```
+- Loads best saved model
+- Loads X_test_final.csv, y_test_final.csv
+- Evaluates on held-out test data
+- Computes accuracy, F1, ROC AUC, PR AUC
+- Plots confusion matrix and curves (train vs test)
+- Saves results to:
+   - results/predictions.csv
+   - results/prediction_metrics.json
 ---
 
 ## Configuration
 
-Default parameters are stored in `config/main.yaml`.
+All pipeline parameters are defined in one YAML file managed by Hydra:
+ `config/main.yaml`.
 
 Examples of settings you can control:
 - **Preprocessing** → imputation method, scaling, feature engineering steps  
 - **Model** → type (`random_forest`, `logistic_regression`), hyperparameters  
 - **Cross-validation** → number of folds, scoring metric  
 
-Override configuration from the command line:
+You can override parameters directly from the command line:
 ```bash
 python src/train_model.py model.type=logistic_regression
 
 ```
 ---
 
-## Testing
-Run tests with:
+## Jupyter Notebooks
+Notebooks are provided for exploratory analysis and quick model testing:
+- data_inspection.ipynb
+- evaluate_models.ipynb
+
+To use them with your Poetry environment:
 ```bash
-pytest tests/
+poetry run pip install jupyter ipykernel
+poetry run python -m ipykernel install --user --name=hospital-readmission
 ```
 
----
-
-## Jupyter Notebooks
-
-To run the notebooks in `notebooks/` inside the Poetry environment:
-
-1. Install Jupyter in the Poetry environment:
-   ```bash
-   poetry run pip install jupyter ipykernel
-   ```
-
-2. Register the environment as a kernel:
- ```bash
-   poetry run python -m ipykernel install --user --name=hospital-readmission
-   ```
-3. In VS Code (or JupyterLab), select the kernel hospital-readmission when opening the notebook.
+Then select the kernel hospital-readmission in VS Code or JupyterLab.
 
 
