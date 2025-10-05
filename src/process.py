@@ -1,5 +1,6 @@
 
 import os
+from pathlib import Path
 import hydra
 import numpy as np
 from omegaconf import DictConfig
@@ -7,6 +8,7 @@ import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 import matplotlib.pyplot as plt
 
+from src.feature_selection import finalize_feature_dataset, run_feature_selection
 from src.visualisation import inspect_data, plot_correlation_matrix, plot_class_counts, plot_outliers_per_subject, \
     plot_outliers_per_feature, plot_pca_variance, plot_pca_feature_importance
 from src.utils import load_data, save_final_datasets, save_preprocessor, split_and_save_dataset
@@ -65,6 +67,8 @@ def process(config: DictConfig) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, 
     
     y_train = train[TARGET]
     y_test = test[TARGET]
+    X_train = train.drop(columns=[TARGET])
+    X_test  = test.drop(columns=[TARGET])
     
     # ------------------------------------------------------------------ #
     # 3) Feature processing
@@ -81,19 +85,19 @@ def process(config: DictConfig) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, 
         df_bin_final, df_num2 = process_binary_variables(df_num)
 
         # Numerical cleaning
-        df_num2 = process_numerical_variables(df_num2)
+        df_num3 = process_numerical_variables(df_num2)
 
         # Ordinal block
         ordinal_cols = ["Killip.grade", "NYHA.cardiac.function.classification", "ageCat", "CCI.score"]
-        df_cat_final, df_num_final, df_ord_final = process_ordinal_variables(df_cat2, df_num2, ordinal_cols)
+        df_cat_final, df_num_final, df_ord_final = process_ordinal_variables(df_cat2, df_num3, ordinal_cols)
 
         return df_cat_final, df_bin_final, df_num_final, df_ord_final
 
     # Train blocks
-    X_train_cat, X_train_bin, X_train_num, X_train_ord = process_features(train)
+    X_train_cat, X_train_bin, X_train_num, X_train_ord = process_features(X_train)
 
     # Test blocks
-    X_test_cat, X_test_bin, X_test_num, X_test_ord = process_features(test)
+    X_test_cat, X_test_bin, X_test_num, X_test_ord = process_features(X_test)
 
     # ------------------------------------------------------------------ #
     # 4) Apply processing step and save final datasets
@@ -108,81 +112,130 @@ def process(config: DictConfig) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, 
     X_train_prepared = pre.fit_transform(X_train_full)
     X_test_prepared = pre.transform(X_test_full)
     
-    # Assign the original feature names
-    feature_names = pre.get_feature_names_out()
-    X_train_prepared = pd.DataFrame(X_train_prepared, columns=feature_names, index=train.index)
-    X_test_prepared = pd.DataFrame(X_test_prepared, columns=feature_names, index=test.index)
+    # # Assign the original feature names
+    # feature_names = pre.get_feature_names_out()
+    # X_train_prepared = pd.DataFrame(X_train_prepared, columns=feature_names, index=train.index)
+    # X_test_prepared = pd.DataFrame(X_test_prepared, columns=feature_names, index=test.index)
 
-    save_final_datasets(X_train_prepared, X_test_prepared, y_train, y_test, config.data.final)
+    if config.preprocessing.get("save_preprocessor", True):
+        save_preprocessor(pre, "./models/preprocessor.joblib")
 
-    if config.preprocessing.get("save_preprocessor", False):
-        save_preprocessor(pre, "../models/preprocessor.joblib")
+    # ------------------------------------------------------------------ #
+    # 5) Apply Feature Selection and save final datasets
+    # ------------------------------------------------------------------ #
 
-    return X_train_prepared, X_test_prepared, y_train, y_test
+    if config.feature_selection.run:
+        fs_artifacts = run_feature_selection(
+            config,
+            X_train_prepared=X_train_prepared,
+            y_train=y_train,
+        )
+
+        print("Feature selection artifacts:", fs_artifacts.get("variants", {}).keys())
+
+    X_train_final, X_test_final, y_train, y_test = finalize_feature_dataset(
+        X_train_prepared=X_train_prepared,
+        X_test_prepared=X_test_prepared,
+        y_train=y_train,
+        y_test=y_test,
+        processed_dir=Path(config.data.processed),
+        final_dir=Path(config.data.final),    
+        models_dir=Path("models"),
+        manual_features=config.finalise_dataset.manual_features,
+        tag=config.finalise_dataset.final_features
+    )
+
+    return X_train_final, X_test_final, y_train, y_test
 
 
-def _pdna_to_nan_numpy(X: Any) -> np.ndarray:
-    df = pd.DataFrame(X)
-    df = df.astype(object).where(pd.notna(df), np.nan)
-    return df.to_numpy()
+def pdna_to_nan_numpy(X):
+    # Convert pandas NA-like to np.nan without changing shape
+    if isinstance(X, pd.DataFrame):
+        return X.replace({pd.NA: np.nan}).values
+    if isinstance(X, pd.Series):
+        return X.replace({pd.NA: np.nan}).to_numpy()
+    return X
+
+def to_float32(X):
+    # Cast to float32 while preserving shape
+    return X.astype(np.float32)
+
+def identity(X):
+    return X
 
 
-def build_preprocessor(x_cat: pd.DataFrame, x_binary: pd.DataFrame, 
-                       x_num: pd.DataFrame, x_ord: pd.DataFrame, 
-                       config: DictConfig,) -> ColumnTransformer:
-
-    # Extract configuration options
-    impute_num = config.preprocessing.impute_method.numeric
-    impute_cat = config.preprocessing.impute_method.categorical
-    impute_binord = config.preprocessing.impute_method.binary_ordinal
-    scaling_method = config.preprocessing.scaling
+def build_preprocessor(x_cat, x_binary, x_num, x_ord, config) -> ColumnTransformer:
+    impute_num   = config.preprocessing.impute_method.numeric
+    impute_cat   = config.preprocessing.impute_method.categorical
+    impute_binord= config.preprocessing.impute_method.binary_ordinal
+    scaling      = config.preprocessing.scaling
     cat_encoding = config.preprocessing.categorical_encoding
 
-    cat_cols = x_cat.columns.tolist()
-    bin_ord_cols = x_binary.columns.tolist() + x_ord.columns.tolist()
-    num_cols = x_num.columns.tolist()
+    cat_cols   = x_cat.columns.tolist()
+    bin_cols   = x_binary.columns.tolist()
+    ord_cols   = x_ord.columns.tolist()
+    num_cols   = x_num.columns.tolist()
 
-    # Choose scaler for numerical variables
-    if scaling_method == "standard":
+    # scaler for numeric
+    if scaling == "standard":
         scaler = StandardScaler()
-    elif scaling_method == "minmax":
+    elif scaling == "minmax":
         scaler = MinMaxScaler()
-    elif scaling_method == "robust":
+    elif scaling == "robust":
         scaler = RobustScaler()
     else:
         scaler = "passthrough"
 
-    # Build numeric pipeline with optional standard scaling
+    # numeric pipeline
     num_steps = [("impute", SimpleImputer(strategy=impute_num))]
     if scaler != "passthrough":
         num_steps.append(("scale", scaler))
     num_pipe = Pipeline(num_steps)
 
-    # Build categorical pipeline
+    # categorical pipeline (One-Hot Encoding optional)
     cat_steps = [
-        ("nafix", FunctionTransformer(_pdna_to_nan_numpy, feature_names_out="one-to-one")),
+        ("nafix",  FunctionTransformer(pdna_to_nan_numpy, feature_names_out="one-to-one")),
         ("impute", SimpleImputer(missing_values=np.nan, strategy=impute_cat)),
     ]
     if cat_encoding == "onehot":
-        cat_steps.append(("ohe", OneHotEncoder(handle_unknown="ignore", sparse_output=False)))
+        cat_steps.append(("ohe", OneHotEncoder(handle_unknown="ignore",
+                                               sparse_output=False,
+                                               dtype=np.int64)))
     cat_pipe = Pipeline(cat_steps)
 
-    # Binary/Ordinal pipeline
-    binord_pipe = Pipeline([
-        ("nafix", FunctionTransformer(_pdna_to_nan_numpy, feature_names_out="one-to-one")),
-        ("impute", SimpleImputer(missing_values=np.nan, strategy=impute_binord)),
+    # binary pipeline 
+    bin_pipe = Pipeline([
+        ("nafix",   FunctionTransformer(pdna_to_nan_numpy, feature_names_out="one-to-one")),
+        ("impute",  SimpleImputer(missing_values=np.nan, strategy=impute_binord)),
+        ("tofloat", FunctionTransformer(to_float32, feature_names_out="one-to-one")),
     ])
 
-    preprocessor = ColumnTransformer(
+    # ordinal pipeline 
+    ord_pipe = Pipeline([
+        ("nafix",   FunctionTransformer(pdna_to_nan_numpy, feature_names_out="one-to-one")),
+        ("impute",  SimpleImputer(missing_values=np.nan, strategy=impute_binord)),
+        ("tofloat", FunctionTransformer(to_float32, feature_names_out="one-to-one")),
+    ])
+
+    pre = ColumnTransformer(
         transformers=[
-            ("num", num_pipe, num_cols),
-            ("cat", cat_pipe, cat_cols),
-            ("binord", binord_pipe, bin_ord_cols),
+            ("num",    num_pipe,  num_cols),
+            ("cat",    cat_pipe,  cat_cols),
+            ("binary", bin_pipe,  bin_cols),
+            ("ord",    ord_pipe,  ord_cols),
         ],
-        remainder="drop"
+        remainder="drop",
+        verbose_feature_names_out=False,
     )
 
-    return preprocessor
+    # Optional (sklearn >= 1.2): get pandas DataFrames back with dtypes preserved
+    try:
+        pre.set_output(transform="pandas")
+    except Exception:
+        pass
+
+    return pre
+
 
 
 def remove_dead_patients(df: pd.DataFrame) -> pd.DataFrame:
@@ -348,7 +401,6 @@ def check_nan_columns(df: pd.DataFrame, threshold: float = 0.25) -> None:
 def drop_high_nan_columns(df: pd.DataFrame, threshold: float = 0.3) -> pd.DataFrame:
     high_nan_columns = df.columns[df.isna().sum() > len(df) * threshold]
     print(f"Dropping {len(high_nan_columns)} columns with %NaN > {threshold * 100}%:")
-    print(high_nan_columns.tolist())
     return df.drop(columns=high_nan_columns)
 
 
@@ -511,75 +563,20 @@ def evaluate_imputation_methods(
     return scores
 
 
-class FeatureSelector:
-    def __init__(
-        self,
-        estimator: BaseEstimator,
-        n_features: int,
-        corr_threshold: float = 0.85,
-        scoring: str = 'accuracy',
-        cv: int = 3,
-        n_jobs: int = -1,
-    ):
-        self.estimator = estimator
-        self.n_features = n_features
-        self.corr_threshold = corr_threshold
-        self.scoring = scoring
-        self.cv = cv
-        self.n_jobs = n_jobs
+def analyze_outliers(df: pd.DataFrame, plot_per_subject: bool = True, plot_per_feature: bool = True) -> pd.DataFrame:
+    # List features
+    feature_list = df.columns.tolist()
+    print(f'Train subjects before outlier removal: {df.shape}')
 
-    def _correlation_filter(self, dataset: pd.DataFrame) -> pd.DataFrame:
-        correlated_features = set()
-        correlation_matrix = dataset.corr().abs()
-        mean_corr = correlation_matrix.mean(axis=0)
+    # Apply Z-score normalization
+    df_zscored = df.apply(zscore, axis=0)
+    abs_zscores = abs(df_zscored)
 
-        for i in range(len(correlation_matrix.columns)):
-            for j in range(i):
-                if correlation_matrix.iloc[i, j] > self.corr_threshold:
-                    # Keep the feature that is less correlated with others
-                    colname = correlation_matrix.columns[i] if mean_corr.iloc[i] > mean_corr.iloc[j] else correlation_matrix.columns[j]
-                    correlated_features.add(colname)
+    # Plot outliers
+    plot_outliers_per_subject(abs_zscores) if plot_per_subject else None
+    plot_outliers_per_feature(abs_zscores) if plot_per_feature else None
 
-        print(f"Correlation filter removed {len(correlated_features)} features.")
-        return dataset.drop(columns=correlated_features)
-
-    def _sequential_feature_selection(
-        self, dataset: pd.DataFrame, labels: pd.Series, method: str
-    ) -> Tuple[pd.DataFrame, List[str]]:
-
-        if method == 'SBS':
-            selector = SequentialFeatureSelector(
-                self.estimator, n_features_to_select=self.n_features, direction='backward',
-                scoring=self.scoring, cv=self.cv, n_jobs=self.n_jobs
-            )
-        elif method == 'SFS':
-            selector = SequentialFeatureSelector(
-                self.estimator, n_features_to_select=self.n_features, direction='forward',
-                scoring=self.scoring, cv=self.cv, n_jobs=self.n_jobs
-            )
-        else:
-            raise ValueError("Invalid method. Choose 'SFS' or 'SBS'.")
-
-        selector.fit(dataset, labels)
-        selected_features = dataset.columns[selector.get_support()]
-        print(f"Sequential Feature Selection reduced features to {len(selected_features)}.")
-        return dataset[selected_features], list(selected_features)
-
-    def fit(
-        self,
-        dataset: pd.DataFrame,
-        labels: pd.Series,
-        corr_based: bool = True,
-        method: str = 'SFS',
-    ) -> Tuple[pd.DataFrame, List[str]]:
-
-        if corr_based:
-            print("Performing correlation-based feature filtering...")
-            dataset = self._correlation_filter(dataset)
-
-        print("Performing sequential feature selection...")
-        return self._sequential_feature_selection(dataset, labels, method)
-
+    return df_zscored
 
 def apply_pca(df: pd.DataFrame, n_components: Optional[Union[int, None]] = None, plot_exp_variance: bool = True,
               plot_feat_importance: bool = True) -> pd.DataFrame:
@@ -606,24 +603,6 @@ def apply_pca(df: pd.DataFrame, n_components: Optional[Union[int, None]] = None,
         plot_pca_feature_importance(df, pca)
 
     return df_pca
-
-
-def analyze_outliers(df: pd.DataFrame, plot_per_subject: bool = True, plot_per_feature: bool = True) -> pd.DataFrame:
-    # List features
-    feature_list = df.columns.tolist()
-    print(f'Train subjects before outlier removal: {df.shape}')
-
-    # Apply Z-score normalization
-    df_zscored = df.apply(zscore, axis=0)
-    abs_zscores = abs(df_zscored)
-
-    # Plot outliers
-    plot_outliers_per_subject(abs_zscores) if plot_per_subject else None
-    plot_outliers_per_feature(abs_zscores) if plot_per_feature else None
-
-    return df_zscored
-
-
 
 if __name__ == "__main__":
     main()

@@ -70,6 +70,7 @@ macOS/Linux:
 source .venv/bin/activate
 ```
 Once activated, your prompt should show (hospital_readmission) and you can run your scripts with python. 
+
 Alternatively, you can skip activation and run scripts directly with Poetry, e.g.:
 ```bash
 poetry run python -m src.process

@@ -1,11 +1,14 @@
 
 import os
-from typing import Any, Union
+from typing import Any, Dict, Union
 import joblib
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from hydra.utils import to_absolute_path
 from pathlib import Path
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]  # .../hospital_readmission
 
@@ -16,6 +19,19 @@ def load_data(data_path: str) -> pd.DataFrame:
 def _resolve_repo_path(rel_path: str | Path) -> Path:
     p = Path(rel_path)
     return p if p.is_absolute() else PROJECT_ROOT / p
+
+def save_dataframe(output_path: Path, data: Union[pd.DataFrame, pd.Series], *, index: bool = True) -> Path:
+    path = _resolve_repo_path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(data, pd.Series):
+        data = data.to_frame(name=data.name or "target")
+    data.to_csv(path, index=index)
+    return path
+
+def save_feature_names_as_txt(path: Path, df: pd.DataFrame) -> None:
+    feature_list_path = _resolve_repo_path(path / "feature_names_all.txt")
+    feature_list_path.write_text("\n".join(df.columns))
+
 
 def split_and_save_dataset(df: pd.DataFrame, target_column: str, test_size: float, output_dir: str, random_state: int = 42) -> tuple[pd.DataFrame, pd.DataFrame]:
 
@@ -36,8 +52,8 @@ def split_and_save_dataset(df: pd.DataFrame, target_column: str, test_size: floa
     test_df = pd.concat([x_test, y_test], axis=1).reset_index(drop=True)
 
     # Save the train and test sets to CSV files
-    train_path = f"{path}/train.csv"
-    test_path = f"{path}/test.csv"
+    train_path = path / "train.csv"
+    test_path = path / "test.csv"
     train_df.to_csv(train_path, index=False)
     test_df.to_csv(test_path, index=False)
 
@@ -79,4 +95,12 @@ def save_preprocessor(preprocessor: Any, output_path: Union[str, Path] = "../mod
 
     joblib.dump(preprocessor, path)
     print(f"Preprocessor saved to {path}")
+
+
+def make_estimator(kind: str):
+    if kind == "logreg_l2":
+        return LogisticRegression(max_iter=200, solver="lbfgs")
+    if kind == "rf_100":
+        return RandomForestClassifier(n_estimators=100, random_state=42)
+    raise ValueError(f"Unknown estimator kind: {kind}")
     

@@ -13,7 +13,7 @@ from omegaconf import DictConfig
 
 
 def run_training(cfg: DictConfig) -> None:
-    print("🤖 Training model...")
+    print("Training model...")
     print(f"Processed data: {cfg.data.processed}")
     print(f"Model type: {cfg.model.type}")
     print(f"Hyperparameters: {cfg.model.hyperparameters}")

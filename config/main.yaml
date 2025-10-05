@@ -17,7 +17,24 @@ preprocessing:
   categorical_encoding: onehot  # onehot or none
   save_preprocessor: true
 
+ # Feature selection
+feature_selection:
+  run: False            # set false to skip FS entirely
+  methods: ["SFS"]   # run multiple variants in one go with ["none", "SFS", "SBS"] 
+  k_list: [20]     # how many features for SFS/SBS; ignored for "none"
+  corr_threshold: 0.85 # set null to skip correlation filter
+  estimator: "rf_100"  # "logreg_l2" or "rf_100", check make_estimator() in src.utils.py
+  scoring: "f1"
+  cv: 3
+  n_jobs: -1
 
+# Finalise datsets 
+finalise_dataset:
+  # Select either final_features or manual_features
+  final_features: "SFS_20_RandomForestClassifier(random_state=42)" # "False" or "all" or e.g., "SFS_10_LogisticRegression(max_iter=200)" or "SFS_20_RandomForestClassifier(random_state=42)"
+  manual_features: False # ["exam"] or "False"
+
+ 
 # Model selection & hyperparameters
 model:
   type: random_forest  # Options: random_forest, xgboost, logistic_regression
