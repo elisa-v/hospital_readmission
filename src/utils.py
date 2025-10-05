@@ -20,12 +20,13 @@ def _resolve_repo_path(rel_path: str | Path) -> Path:
     p = Path(rel_path)
     return p if p.is_absolute() else PROJECT_ROOT / p
 
-def save_dataframe(output_path: Path, data: Union[pd.DataFrame, pd.Series], *, index: bool = True) -> Path:
+def save_dataframe(output_path: Path, data: Union[pd.DataFrame, pd.Series], *, name: str | None = None) -> Path:
     path = _resolve_repo_path(output_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     if isinstance(data, pd.Series):
-        data = data.to_frame(name=data.name or "target")
-    data.to_csv(path, index=index)
+        colname = name or (data.name if data.name is not None else "target")
+        data.to_frame(name=colname).to_csv(path, index=False)
+    else:
+        data.to_csv(path, index=False)
     return path
 
 def save_feature_names_as_txt(path: Path, df: pd.DataFrame) -> None:
@@ -50,6 +51,8 @@ def split_and_save_dataset(df: pd.DataFrame, target_column: str, test_size: floa
     # Reunify features and target into DataFrames
     train_df = pd.concat([x_train, y_train], axis=1).reset_index(drop=True)
     test_df = pd.concat([x_test, y_test], axis=1).reset_index(drop=True)
+
+    print()
 
     # Save the train and test sets to CSV files
     train_path = path / "train.csv"

@@ -56,17 +56,17 @@ def process(config: DictConfig) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, 
     df_no_dead_future =df_no_dead.drop(['re.admission.within.3.months','re.admission.within.28.days','time.of.death..days.from.admission.',
                                     're.admission.time..days.from.admission.','return.to.emergency.department.within.6.months',
                                     'time.to.emergency.department.within.6.months'], axis=1)
-    # Sanity: keep only rows with target present
-    df = df_no_dead_future.dropna(subset=[TARGET])
+    ## Sanity: keep only rows with target present
+    #df = df_no_dead_future.dropna(subset=[TARGET])
 
     # ------------------------------------------------------------------ #
     # 2) Train/Test split (stratified)
     # ------------------------------------------------------------------ #
-    train, test = split_and_save_dataset(df, target_column=TARGET, 
+    train, test = split_and_save_dataset(df_no_dead_future, target_column=TARGET, 
                                          output_dir=config.data.processed, test_size=0.2, random_state=42)
     
-    y_train = train[TARGET]
-    y_test = test[TARGET]
+    y_train = train[TARGET].astype("int8")
+    y_test  = test[TARGET].astype("int8")
     X_train = train.drop(columns=[TARGET])
     X_test  = test.drop(columns=[TARGET])
     

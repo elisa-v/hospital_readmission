@@ -30,6 +30,7 @@ dist/
 .ipynb_checkpoints/
 notebooks/readmission-hospital_original.ipynb
 notebooks/readmission-hospital.ipynb
+notebooks/feature_selection.ipynb
 
 
 # Logs 

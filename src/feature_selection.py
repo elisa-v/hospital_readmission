@@ -251,8 +251,8 @@ def finalize_feature_dataset(
 
     save_dataframe(p_Xtr, Xtr_df)
     save_dataframe(p_Xte, Xte_df)
-    save_dataframe(p_ytr, y_train)
-    save_dataframe(p_yte, y_test)
+    save_dataframe(p_ytr, y_train, name='re.admission.within.6.months')
+    save_dataframe(p_yte, y_test, name='re.admission.within.6.months')
 
     return Xtr_df, Xte_df, y_train, y_test
         

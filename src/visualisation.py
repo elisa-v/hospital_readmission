@@ -85,6 +85,21 @@ def plot_distributions(categorical_df: pd.DataFrame, target_df: pd.Series, targe
     plt.tight_layout()
     plt.show()
 
+def plot_correlation_matrix(df: pd.DataFrame, figsize=(12, 10), cmap="coolwarm", save_path=None):
+    corr = df.corr(numeric_only=True)
+
+    plt.figure(figsize=figsize)
+    sns.heatmap(corr, annot=False, cmap=cmap, center=0, square=True,
+                cbar_kws={'shrink': 0.75}, linewidths=0.3)
+
+    plt.title("Feature Correlation Matrix", fontsize=14, pad=15)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=300)
+        print(f"Correlation matrix saved to {save_path}")
+    else:
+        plt.show()
 
 def plot_binary_distributions(binary_df: pd.DataFrame, target_df: pd.Series, target_col: str) -> None:
     # Combine binary DataFrame with the target column for easier splitting

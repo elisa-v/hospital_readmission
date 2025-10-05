@@ -34,17 +34,28 @@ finalise_dataset:
   final_features: "SFS_20_RandomForestClassifier(random_state=42)" # "False" or "all" or e.g., "SFS_10_LogisticRegression(max_iter=200)" or "SFS_20_RandomForestClassifier(random_state=42)"
   manual_features: False # ["exam"] or "False"
 
+# Training / search settings 
+training:
+  test_size: 0.20         # split for validation inside run_training
+  random_state: 42
+  plot_curve: prc         # prc or roc
+  save_results: true
  
 # Model selection & hyperparameters
 model:
-  type: random_forest  # Options: random_forest, xgboost, logistic_regression
+  type: rf_100      # random_forest | logistic_regression | xgboost
   hyperparameters:
-    n_estimators: 100
-    max_depth: 10
-    learning_rate: 0.1
+    n_estimators: [100, 200, 300]
+    max_depth: [null, 10, 20]
+    min_samples_split: [2, 5]
+    min_samples_leaf: [1, 2]
   cross_validation:
     folds: 5
-    scoring: accuracy
+    scoring: f1
+
+# model path
+paths:
+  models_dir: models
 
 # Experiment tracking
 experiment:
