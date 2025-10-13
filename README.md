@@ -1,7 +1,7 @@
-# Patient Readmission Prediction
+# Hospital Readmission Prediction in Heart Failure Patients
 
 ## Overview  
-This project builds a reproducible machine learning pipeline to predict patient readmission using structured hospital data.
+This project builds a reproducible machine learning pipeline to predict hospital readmission in heart failure patients
 
 The workflow is fully automated:
 
