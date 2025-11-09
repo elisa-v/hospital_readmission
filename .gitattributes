@@ -1,0 +1,2 @@
+# Treat notebooks as auxiliary (ignored in language stats)
+notebooks/*.ipynb linguist-vendored
